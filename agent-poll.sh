@@ -10,7 +10,7 @@ AGENT_DETECT_EVERY=3   # 每 3 轮 = 6 秒做一次 agent 类型检测（pgrep+p
 CAPTURE_EVERY=2        # 每 2 轮 = 4 秒抓一次底部 hash（spinner 检测最贵，占总开销 70%）
 
 # 单实例文件锁：set -C + > 用 O_CREAT|O_EXCL 原子写 pid（一次 syscall，无 mkdir/pid-write race）
-LOCKFILE="/tmp/tmux-ai-agent-poll.pid"
+LOCKFILE="/tmp/tmux-ai-bar-agent-poll.pid"
 if ! (set -C; echo $$ > "$LOCKFILE") 2>/dev/null; then
   old_pid=$(cat "$LOCKFILE" 2>/dev/null)
   if [ -n "$old_pid" ] && kill -0 "$old_pid" 2>/dev/null; then

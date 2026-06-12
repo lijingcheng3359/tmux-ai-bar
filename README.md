@@ -1,8 +1,8 @@
-# tmux-ai
+# tmux-ai-bar
 
 > Tmux status bar for multi-agent workflows — see which AI agent is busy, done, or idle at a glance.
 
-![tmux-ai preview](./preview.png)
+![tmux-ai-bar preview](./preview.png)
 
 给同时跑多个 AI agent 的 tmux 用户加状态色，一眼看出哪个 agent 在干活、哪个干完了等你 review：
 
@@ -19,15 +19,15 @@
 
 ```bash
 # 1. clone
-git clone https://github.com/lijingcheng3359/tmux-ai ~/dev/tmux-ai
+git clone https://github.com/lijingcheng3359/tmux-ai-bar ~/dev/tmux-ai-bar
 
 # 2. 备份现有配置
 [ -e ~/.tmux.conf ] && mv ~/.tmux.conf ~/.tmux.conf.bak.$(date +%Y%m%d)
 mkdir -p ~/.tmux
 
 # 3. 软链
-ln -s ~/dev/tmux-ai/tmux.conf ~/.tmux.conf
-ln -s ~/dev/tmux-ai/agent-poll.sh ~/.tmux/agent-poll.sh
+ln -s ~/dev/tmux-ai-bar/tmux.conf ~/.tmux.conf
+ln -s ~/dev/tmux-ai-bar/agent-poll.sh ~/.tmux/agent-poll.sh
 
 # 4. 启动
 tmux kill-server   # 注意：会断已有 session
