@@ -4,115 +4,121 @@
 
 ![tmux-ai-bar preview](./preview.png)
 
-给同时跑多个 AI agent 的 tmux 用户加状态色，一眼看出哪个 agent 在干活、哪个干完了等你 review：
+Color-coded tmux status bar that tracks AI agent activity across windows:
 
-| 状态 | 含义 |
+| Status | Meaning |
 |---|---|
-| 🟡 **黄底** | agent 正在产生输出（干活中） |
-| 🔴 **红底** | 已静默 ≥8 秒（完成或卡住，等你 review） |
-| ⚪ 默认色 | 空闲 / 已 review / 从未活动 |
-| Ⓒ Ⓗ Ⓠ 后缀 | Ⓒ=Claude Code，Ⓗ=Hermes，Ⓠ=Qoder CLI（按进程命令行自动识别） |
+| **Yellow** | Agent is producing output (working) |
+| **Red** | Silent for 8+ seconds (done or stuck — needs your review) |
+| Default | Idle / reviewed / never active |
+| Suffix | Auto-detected agent type via process inspection |
 
-## 安装
+Built-in agent detection: Claude Code, Hermes, Qoder CLI. Easy to add your own.
 
-依赖：tmux ≥ 3.0（`brew install tmux`），支持真彩色的终端（iTerm2 / Warp / Ghostty 等）。
+## Requirements
+
+- tmux >= 3.0
+- A true-color terminal (iTerm2, Warp, Ghostty, Alacritty, etc.)
+- macOS (Linux support is untested)
+
+## Install
 
 ```bash
-# 1. clone
+# 1. Clone
 git clone https://github.com/lijingcheng3359/tmux-ai-bar ~/dev/tmux-ai-bar
 
-# 2. 备份现有配置
+# 2. Back up existing config
 [ -e ~/.tmux.conf ] && mv ~/.tmux.conf ~/.tmux.conf.bak.$(date +%Y%m%d)
 mkdir -p ~/.tmux
 
-# 3. 软链
+# 3. Symlink
 ln -s ~/dev/tmux-ai-bar/tmux.conf ~/.tmux.conf
 ln -s ~/dev/tmux-ai-bar/agent-poll.sh ~/.tmux/agent-poll.sh
 
-# 4. 启动
-tmux kill-server   # 注意：会断已有 session
+# 4. Start tmux
+tmux kill-server   # warning: kills existing sessions
 tmux new -s ai
 ```
 
-验证 poller 已启动：
+Verify the poller is running:
 
 ```bash
-pgrep -f agent-poll.sh   # 应该有 PID
+pgrep -f agent-poll.sh   # should print a PID
 ```
 
-## 用法
+## Usage
 
-每个 tmux window 跑一个 agent，切到任意 window 看状态栏：
+Run one agent per tmux window. The status bar shows activity at a glance:
 
 ```
-🍓[0:myproject]  [1:api-serverⒸ ]  [2:ml-pipelineⒽ ]  [3:refactorⓆ ]
-     ↑ 你在这         ↑ 黄底=干活中       ↑ 红底=等review       ↑ 黄底=干活中
+[0:myproject]  [1:api-server]  [2:ml-pipeline]  [3:refactor]
+  ^ you are here    ^ yellow = working   ^ red = review     ^ yellow = working
 ```
 
-哪个先变红就切过去 review。切到 window 会自动清红标（视为已 review）。
+Switch to whichever window turns red first to review the output. Switching to a window automatically clears the red indicator.
 
-**快捷键**（prefix 默认 `Ctrl+J`）：
+**Keybindings** (prefix default: `Ctrl+J`):
 
-| 按键 | 功能 |
+| Key | Action |
 |---|---|
-| `prefix + r` | 重置当前 window 的状态（清 active/done） |
-| `prefix + R` | 重新加载 tmux.conf |
+| `prefix + r` | Reset current window status |
+| `prefix + R` | Reload tmux.conf |
 
-## 自定义 agent
+## Adding Custom Agents
 
-编辑 `agent-poll.sh` 中的 `detect_agent` 函数，在 `case` 语句里添加匹配规则：
+Edit the `detect_agent` function in `agent-poll.sh` and add a pattern to the `case` statement:
 
 ```bash
 case "$cmd" in
-  *claude*|*"@anthropic-ai/claude"*) echo "Ⓒ"; return ;;
-  *hermes*) echo "Ⓗ"; return ;;
-  *qodercli*) echo "Ⓠ"; return ;;
-  *your-agent*) echo "Ⓧ"; return ;;   # ← 加在这里
+  *claude*|*"@anthropic-ai/claude"*) echo "C"; return ;;
+  *hermes*) echo "H"; return ;;
+  *qodercli*) echo "Q"; return ;;
+  *your-agent*) echo "X"; return ;;   # <-- add here
 esac
 ```
 
-注意：函数里有两层相同的 `case`（子进程和孙进程），两处都要加。改完后重启 poller：
+Note: the function has two identical `case` blocks (for child and grandchild processes) — update both. Then restart the poller:
 
 ```bash
 pkill -f agent-poll.sh
 tmux source-file ~/.tmux.conf
 ```
 
-## 可调参数
+## Configuration
 
-`agent-poll.sh` 顶部：
+Tunable parameters at the top of `agent-poll.sh`:
+
+| Variable | Default | Description |
+|---|---|---|
+| `SLEEP_INTERVAL` | `2` | Poll interval in seconds |
+| `SILENT_THRESHOLD` | `4` | Rounds of silence before marking done (4 x 2s = 8s) |
+| `GROWTH_THRESHOLD` | `1` | Rounds of output before marking active |
+| `AGENT_DETECT_EVERY` | `3` | Rounds between agent type detection (3 x 2s = 6s) |
+
+Status bar colors in `tmux.conf`:
 
 ```bash
-SLEEP_INTERVAL=2       # 主循环周期（秒）
-SILENT_THRESHOLD=4     # 4 轮 × 2s = 8 秒静默 → 变红
-GROWTH_THRESHOLD=1     # 1 轮有输出 → 变黄
-AGENT_DETECT_EVERY=3   # 每 3 轮 = 6 秒做一次 agent 类型检测
+bg=#ffcc00   # yellow (active)
+bg=#ff3b30   # red (done)
 ```
 
-`tmux.conf` 里可改状态色：
+## How It Works
 
-```bash
-bg=#ffcc00   # 黄（active）
-bg=#ff3b30   # 红（done）
-```
+- Background `agent-poll.sh` polls all windows every 2 seconds, detecting output activity via `history_bytes` growth
+- Bottom 5-line hash detects in-place refreshes (spinners, timers); requires 2 consecutive changes to confirm (debounces sleep/wake artifacts)
+- `pgrep` + `ps` walks the pane process tree (3 levels deep) to identify agent type by command-line keywords
+- Switching to a window triggers `session-window-changed` hook, auto-clearing the done state
+- Agent exit requires 2 consecutive detection misses before confirming (prevents false clears during fork/exec gaps)
 
-## 工作原理
+## Known Limitations
 
-- 后台 `agent-poll.sh` 每 2 秒扫所有 window，通过 `history_bytes` 增长检测输出活动
-- 底部 5 行 hash 变化检测原地刷新（spinner/计时器），需连续 2 次才采信（防止休眠唤醒误判）
-- `pgrep` + `ps` 遍历 pane 进程树（3 层），按命令行关键字识别 agent 类型
-- 切 window 触发 `session-window-changed` hook 自动清 `@done`
-- agent 退出需连续 2 次检测不到才确认（防止 fork/exec 间隙误清）
+- Shell built-in loops (`for i; echo`) keep `pane_current_command` as `zsh` — not detected as an agent
+- Very short commands (< 1 second) may not be caught by the poller
+- Agents with continuous spinner output stay yellow indefinitely and never trigger the done state
 
-## 已知限制
+## Note
 
-- shell 内置循环（`for i; echo`）`pane_current_command` 永远是 zsh，不会被识别为 agent
-- 短命令（<1 秒）poller 可能抓不到状态变化
-- 某些 agent 的 thinking spinner 持续输出 → 始终黄底，不会触发 done
-
-## 注意
-
-`tmux.conf` 包含个人偏好设置（prefix 改 `Ctrl+J`、base-index 从 0 开始、vim mode 等）。如果只需要 agent 状态功能，建议挑选相关配置复制到你自己的 `tmux.conf`。
+The included `tmux.conf` contains personal preferences (prefix remapped to `Ctrl+J`, vim mode, etc.). If you only want the agent status feature, copy the relevant sections into your own `tmux.conf`.
 
 ## License
 
