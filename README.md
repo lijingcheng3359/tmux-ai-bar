@@ -13,7 +13,7 @@ Color-coded tmux status bar that tracks AI agent activity across windows:
 | Default | Idle / reviewed / never active |
 | Suffix | Auto-detected agent type via process inspection |
 
-Built-in agent detection: Claude Code, Hermes, Qoder CLI. Easy to add your own.
+Built-in agent detection: Claude Code, Codex CLI, Gemini CLI, OpenCode, Hermes, Qoder CLI. Easy to add your own.
 
 ## Requirements
 

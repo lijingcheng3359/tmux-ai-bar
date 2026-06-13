@@ -31,6 +31,9 @@ detect_agent() {
     cmd=$(ps -p "$pid" -o command= 2>/dev/null)
     case "$cmd" in
       *claude*|*"@anthropic-ai/claude"*) echo "Ⓒ"; return ;;
+      *codex*) echo "Ⓧ"; return ;;
+      *gemini*) echo "Ⓖ"; return ;;
+      *opencode*) echo "Ⓞ"; return ;;
       *hermes*) echo "Ⓗ"; return ;;
       *qodercli*) echo "Ⓠ"; return ;;
     esac
@@ -41,6 +44,9 @@ detect_agent() {
       cmd=$(ps -p "$sub" -o command= 2>/dev/null)
       case "$cmd" in
         *claude*|*"@anthropic-ai/claude"*) echo "Ⓒ"; return ;;
+        *codex*) echo "Ⓧ"; return ;;
+        *gemini*) echo "Ⓖ"; return ;;
+        *opencode*) echo "Ⓞ"; return ;;
         *hermes*) echo "Ⓗ"; return ;;
         *qodercli*) echo "Ⓠ"; return ;;
       esac
