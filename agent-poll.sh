@@ -9,18 +9,24 @@ GROWTH_THRESHOLD=1     # 1 round of output growth -> active
 AGENT_DETECT_EVERY=3   # every 3 rounds = 6s; agent type detection (pgrep+ps is expensive)
 CAPTURE_EVERY=2        # every 2 rounds = 4s; bottom-hash capture (most expensive op, ~70% cost)
 
-# Single-instance file lock: set -C uses O_CREAT|O_EXCL for atomic pid write (no mkdir/pid-write race)
+# Single instance guard: lockfile holds the PID of the running poller.
+# Fast exit if a legitimate poller already owns the lock; otherwise kill orphans and take over.
+# Trap only removes the lockfile if it still contains OUR PID (prevents removing a successor's lock).
 LOCKFILE="/tmp/tmux-ai-bar-agent-poll.pid"
-if ! (set -C; echo $$ > "$LOCKFILE") 2>/dev/null; then
+if [ -f "$LOCKFILE" ]; then
   old_pid=$(cat "$LOCKFILE" 2>/dev/null)
-  if [ -n "$old_pid" ] && kill -0 "$old_pid" 2>/dev/null; then
-    exit 0   # already running
+  if [ -n "$old_pid" ] && [ "$old_pid" != "$$" ] && kill -0 "$old_pid" 2>/dev/null; then
+    case "$(ps -p "$old_pid" -o command= 2>/dev/null)" in
+      *agent-poll*) exit 0 ;;
+    esac
   fi
-  # stale lock, clean up and retry once
-  rm -f "$LOCKFILE"
-  (set -C; echo $$ > "$LOCKFILE") 2>/dev/null || exit 0
 fi
-trap 'rm -f "$LOCKFILE"' EXIT INT TERM
+for pid in $(pgrep -f 'agent-poll\.sh' 2>/dev/null); do
+  [ "$pid" != "$$" ] && kill "$pid" 2>/dev/null
+done
+sleep 0.2
+echo $$ > "$LOCKFILE"
+trap '[ "$(cat "$LOCKFILE" 2>/dev/null)" = "$$" ] && rm -f "$LOCKFILE"' EXIT INT TERM
 
 detect_agent() {
   local pane_pid=$1
@@ -83,7 +89,7 @@ while tmux info > /dev/null 2>&1; do
         miss=0
       elif [ -z "$new_marker" ] && [ -n "$marker" ]; then
         miss=$((miss + 1))
-        if [ "$miss" -ge 2 ]; then
+        if [ "$miss" -ge 3 ]; then
           marker=""
           marker_changed=1
           miss=0
