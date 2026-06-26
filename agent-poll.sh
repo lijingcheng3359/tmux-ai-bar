@@ -9,6 +9,17 @@ GROWTH_THRESHOLD=1     # 1 round of output growth -> active
 AGENT_DETECT_EVERY=3   # every 3 rounds = 6s; agent type detection (pgrep+ps is expensive)
 CAPTURE_EVERY=2        # every 2 rounds = 4s; bottom-hash capture (most expensive op, ~70% cost)
 
+# Debug logging: record state TRANSITIONS only (not per-round) to pin down which rule
+# (silence vs bell) turned a window red. Line-capped retention; flip DEBUG_LOG=0 to disable.
+DEBUG_LOG="${DEBUG_LOG:-1}"
+LOGFILE="/tmp/tmux-ai-bar-debug.log"
+LOG_MAX_LINES=2000     # ~well over an hour of flip events; rotated by tail in the loop
+
+log_event() {
+  [ "$DEBUG_LOG" = 1 ] || return 0
+  printf '%s %s\n' "$(date '+%H:%M:%S')" "$1" >> "$LOGFILE"
+}
+
 # Single instance guard: lockfile holds the PID of the running poller.
 # Fast exit if a legitimate poller already owns the lock; otherwise kill orphans and take over.
 # Trap only removes the lockfile if it still contains OUR PID (prevents removing a successor's lock).
@@ -69,13 +80,21 @@ while tmux info > /dev/null 2>&1; do
   [ $((loop_count % AGENT_DETECT_EVERY)) -eq 0 ] && do_agent_detect=1
   [ $((loop_count % CAPTURE_EVERY)) -eq 0 ] && do_capture=1
 
+  # Rotate debug log every ~60s: keep only the most recent LOG_MAX_LINES lines
+  if [ "$DEBUG_LOG" = 1 ] && [ $((loop_count % 30)) -eq 0 ] && [ -f "$LOGFILE" ]; then
+    lines=$(wc -l < "$LOGFILE" 2>/dev/null || echo 0)
+    if [ "$lines" -gt "$LOG_MAX_LINES" ]; then
+      tail -n "$LOG_MAX_LINES" "$LOGFILE" > "$LOGFILE.tmp" 2>/dev/null && mv "$LOGFILE.tmp" "$LOGFILE"
+    fi
+  fi
+
   # Accumulate setw commands across all windows, flush in a single tmux call at the end
   all_batch=()
 
   # Process substitution (not pipeline) keeps while-loop in the main shell so all_batch accumulates.
   # IFS='|' (not whitespace): bash collapses consecutive whitespace delimiters, which misaligns
   # fields when middle values (e.g. marker) are empty.
-  while IFS='|' read -r wid hb wa ppid lh sc gs was lbh marker miss; do
+  while IFS='|' read -r wid hb wa ppid lh sc gs was lbh marker miss cur_active cur_done; do
     [ -z "$wid" ] && continue
     [ -z "$miss" ] && miss=0
 
@@ -152,7 +171,10 @@ while tmux info > /dev/null 2>&1; do
         # weak signal: increment streak, confirm only after 2 consecutive hash changes
         gs=$((gs + 1))
         sc=0
-        [ "$gs" -ge 2 ] && changed=1
+        # ...but ONLY trust the bottom-hash to SUSTAIN an already-active agent (was=1).
+        # When idle (was=0), a periodic in-place redraw (spinner/clock that never grows
+        # history_bytes) must NOT originate a yellow state, or it loops yellow->red forever.
+        [ "$gs" -ge 2 ] && [ "$was" = 1 ] && changed=1
       elif [ "$do_capture" = 1 ]; then
         # captured but hash unchanged: truly silent, reset streak
         gs=0
@@ -167,9 +189,15 @@ while tmux info > /dev/null 2>&1; do
         new_done=0
         new_was=1
         was=1
+        # Log only the 0->1 transition into active (R1), not every active round
+        [ "$cur_active" != 1 ] && log_event "win=$wid ACTIVE hb=$hb lhb=$lh gs=$gs"
       elif [ "$sc" -ge "$SILENT_THRESHOLD" ]; then
         if [ "$was" = 1 ]; then
-          [ "$wa" = 0 ] && new_done=1
+          if [ "$wa" = 0 ]; then
+            new_done=1
+            # R2: active -> silence transition turned this window red
+            [ "$cur_done" != 1 ] && log_event "win=$wid DONE_BY_SILENCE was=$was sc=$sc hb=$hb"
+          fi
           new_was=0
         fi
         new_active=0
@@ -192,7 +220,7 @@ while tmux info > /dev/null 2>&1; do
       all_batch+=("${per_win[@]}")
     fi
   done < <(tmux list-windows -aF \
-    '#{window_id}|#{history_bytes}|#{window_active}|#{pane_pid}|#{E:@last_hbytes}|#{E:@silent_count}|#{E:@growth_streak}|#{E:@was_active}|#{E:@last_bhash}|#{E:@agent_marker}|#{E:@marker_miss}' \
+    '#{window_id}|#{history_bytes}|#{window_active}|#{pane_pid}|#{E:@last_hbytes}|#{E:@silent_count}|#{E:@growth_streak}|#{E:@was_active}|#{E:@last_bhash}|#{E:@agent_marker}|#{E:@marker_miss}|#{E:@active}|#{E:@done}' \
     2>/dev/null)
 
   # Single tmux call for all windows (previously one fork per window)
