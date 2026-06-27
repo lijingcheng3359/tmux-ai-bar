@@ -94,6 +94,8 @@ Tunable parameters at the top of `agent-poll.sh`:
 | `SILENT_THRESHOLD` | `4` | Rounds of silence before marking done (4 x 2s = 8s) |
 | `GROWTH_THRESHOLD` | `1` | Rounds of output before marking active |
 | `AGENT_DETECT_EVERY` | `3` | Rounds between agent type detection (3 x 2s = 6s) |
+| `CAPTURE_EVERY` | `2` | Rounds between bottom-line hash captures (most expensive op) |
+| `HERMES_MIN_GROWTH` | `128` | Hermes only: min `history_bytes` growth per round to count as output (filters idle heartbeats; other agents use 0) |
 
 Status bar colors in `tmux.conf`:
 

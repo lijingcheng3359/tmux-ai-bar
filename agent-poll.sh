@@ -9,6 +9,13 @@ GROWTH_THRESHOLD=1     # 1 round of output growth -> active
 AGENT_DETECT_EVERY=3   # every 3 rounds = 6s; agent type detection (pgrep+ps is expensive)
 CAPTURE_EVERY=2        # every 2 rounds = 4s; bottom-hash capture (most expensive op, ~70% cost)
 
+# Hermes (Ⓗ) emits periodic idle heartbeats (status/spinner redrawn into history every few
+# seconds: 23/46/69/92... byte bumps, always small multiples). These grow history_bytes, so the
+# normal strong-signal path treats them as output and loops yellow->red forever. For hermes ONLY,
+# a round counts as growth only when history_bytes grew by MORE than this many bytes; real task
+# output is hundreds-to-thousands of bytes and clears it easily. 0 bytes for every other agent.
+HERMES_MIN_GROWTH=128
+
 # Debug logging: record state TRANSITIONS only (not per-round) to pin down which rule
 # (silence vs bell) turned a window red. Line-capped retention; flip DEBUG_LOG=0 to disable.
 DEBUG_LOG="${DEBUG_LOG:-1}"
@@ -158,7 +165,12 @@ while tmux info > /dev/null 2>&1; do
       changed=0
       hb_grew=0
       bhash_changed=0
-      [ -n "$lh" ] && [ "$hb" -gt "$lh" ] && { changed=1; hb_grew=1; }
+      # Per-agent minimum growth to count as a strong signal. Hermes' idle heartbeats are tens of
+      # bytes; require >HERMES_MIN_GROWTH so they're treated as no-growth (won't build gs, won't go
+      # yellow). Every other agent keeps the old >0 behavior (min_growth=0).
+      min_growth=0
+      [ "$marker" = "Ⓗ" ] && min_growth=$HERMES_MIN_GROWTH
+      [ -n "$lh" ] && [ $((hb - lh)) -gt "$min_growth" ] && { changed=1; hb_grew=1; }
       if [ "$hb_grew" = 0 ] && [ -n "$lbh" ] && [ -n "$bh" ] && [ "$bh" != "$lbh" ]; then
         bhash_changed=1
       fi
@@ -184,7 +196,12 @@ while tmux info > /dev/null 2>&1; do
         sc=$((sc + 1))
       fi
 
-      if [ "$changed" = 1 ] && [ "$gs" -ge "$GROWTH_THRESHOLD" ]; then
+      # Hermes needs sustained growth (gs>=2): one above-threshold bump alone could still be a
+      # large-ish heartbeat or reflow; two consecutive growing rounds means real output. Every
+      # other agent keeps the immediate GROWTH_THRESHOLD=1 path.
+      growth_need=$GROWTH_THRESHOLD
+      [ "$marker" = "Ⓗ" ] && growth_need=2
+      if [ "$changed" = 1 ] && [ "$gs" -ge "$growth_need" ]; then
         new_active=1
         new_done=0
         new_was=1
