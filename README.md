@@ -95,7 +95,7 @@ Tunable parameters at the top of `agent-poll.sh`:
 | `GROWTH_THRESHOLD` | `1` | Rounds of output before marking active |
 | `AGENT_DETECT_EVERY` | `3` | Rounds between agent type detection (3 x 2s = 6s) |
 | `CAPTURE_EVERY` | `2` | Rounds between bottom-line hash captures (most expensive op) |
-| `HERMES_MIN_GROWTH` | `128` | Hermes only: min `history_bytes` growth per round to count as output (filters idle heartbeats; other agents use 0) |
+| `agent_min_growth()` | Ⓗ=`128`, Ⓠ=`768`, else `0` | Per-agent min `history_bytes` growth per round to count as output. Heartbeat-prone agents (hermes, qodercli redraw a status line at idle) use a threshold + require sustained 2-round growth, and skip the bottom-hash weak signal entirely. Others use `0` (any growth = output). |
 
 Status bar colors in `tmux.conf`:
 
@@ -116,7 +116,8 @@ bg=#ff3b30   # red (done)
 
 - Shell built-in loops (`for i; echo`) keep `pane_current_command` as `zsh` — not detected as an agent
 - Very short commands (< 1 second) may not be caught by the poller
-- Agents with continuous spinner output stay yellow indefinitely and never trigger the done state
+- Agents with continuous spinner output stay yellow indefinitely and never trigger the done state (except heartbeat-prone agents handled by `agent_min_growth()`, e.g. hermes/qodercli)
+- A heartbeat-prone agent whose real short output is below its `agent_min_growth()` threshold in a single round needs a second growing round before turning yellow
 
 ## Note
 

@@ -9,12 +9,21 @@ GROWTH_THRESHOLD=1     # 1 round of output growth -> active
 AGENT_DETECT_EVERY=3   # every 3 rounds = 6s; agent type detection (pgrep+ps is expensive)
 CAPTURE_EVERY=2        # every 2 rounds = 4s; bottom-hash capture (most expensive op, ~70% cost)
 
-# Hermes (Ⓗ) emits periodic idle heartbeats (status/spinner redrawn into history every few
-# seconds: 23/46/69/92... byte bumps, always small multiples). These grow history_bytes, so the
-# normal strong-signal path treats them as output and loops yellow->red forever. For hermes ONLY,
-# a round counts as growth only when history_bytes grew by MORE than this many bytes; real task
-# output is hundreds-to-thousands of bytes and clears it easily. 0 bytes for every other agent.
-HERMES_MIN_GROWTH=128
+# Some agents redraw a status/spinner line into history while idle, bumping history_bytes by a
+# small amount (multiples of the terminal width: 23/46/92/368/445/670...). The normal strong-signal
+# path treats these heartbeats as output -> yellow, then 8s silence -> red, looping forever.
+# For such agents, a round counts as growth only when history_bytes grew by MORE than a per-agent
+# threshold, AND growth must be sustained 2 rounds (gs>=2). Real task output is many KB and clears
+# both easily. Agents not listed here use threshold 0 (any growth = output, immediate).
+#   Ⓗ hermes:   heartbeats <=115B  -> 128
+#   Ⓠ qodercli: heartbeats <=670B  -> 768 (real short output starts ~693B, sustained-growth saves it)
+agent_min_growth() {
+  case "$1" in
+    "Ⓗ") echo 128 ;;
+    "Ⓠ") echo 768 ;;
+    *)    echo 0 ;;
+  esac
+}
 
 # Debug logging: record state TRANSITIONS only (not per-round) to pin down which rule
 # (silence vs bell) turned a window red. Line-capped retention; flip DEBUG_LOG=0 to disable.
@@ -150,8 +159,11 @@ while tmux info > /dev/null 2>&1; do
       [ -z "$was" ] && was=0
 
       # Hash bottom 5 lines to detect in-place refreshes (spinners, timers).
-      # Skip when history_bytes is already growing (strong signal makes this redundant).
-      if [ "$do_capture" = 1 ] && { [ -z "$lh" ] || [ "$hb" -le "$lh" ]; }; then
+      # Skip when history_bytes is already growing (strong signal makes this redundant), and skip
+      # entirely for heartbeat-prone agents (min_growth>0) since their weak signal is disabled below
+      # — saves the most expensive op (~70% of cost) for those windows.
+      min_growth=$(agent_min_growth "$marker")
+      if [ "$min_growth" = 0 ] && [ "$do_capture" = 1 ] && { [ -z "$lh" ] || [ "$hb" -le "$lh" ]; }; then
         bh=$(tmux capture-pane -p -t "$wid" -S -5 2>/dev/null | cksum | cut -d' ' -f1)
       else
         bh="$lbh"
@@ -165,13 +177,15 @@ while tmux info > /dev/null 2>&1; do
       changed=0
       hb_grew=0
       bhash_changed=0
-      # Per-agent minimum growth to count as a strong signal. Hermes' idle heartbeats are tens of
-      # bytes; require >HERMES_MIN_GROWTH so they're treated as no-growth (won't build gs, won't go
-      # yellow). Every other agent keeps the old >0 behavior (min_growth=0).
-      min_growth=0
-      [ "$marker" = "Ⓗ" ] && min_growth=$HERMES_MIN_GROWTH
+      # Strong signal uses the per-agent min_growth computed above: heartbeat-prone agents require
+      # >threshold so their idle redraws are treated as no-growth (won't build gs, won't go yellow).
+      # Every other agent uses 0 (any growth = output).
       [ -n "$lh" ] && [ $((hb - lh)) -gt "$min_growth" ] && { changed=1; hb_grew=1; }
-      if [ "$hb_grew" = 0 ] && [ -n "$lbh" ] && [ -n "$bh" ] && [ "$bh" != "$lbh" ]; then
+      # Bottom-hash weak signal is DISABLED for heartbeat-prone agents (min_growth>0). They redraw a
+      # status/clock line at idle, so the bottom hash keeps flickering and would falsely sustain
+      # active forever (window never goes red). Their real activity is large history_bytes growth,
+      # already caught above — they don't need the weak signal. Others keep using it for spinner detection.
+      if [ "$min_growth" = 0 ] && [ "$hb_grew" = 0 ] && [ -n "$lbh" ] && [ -n "$bh" ] && [ "$bh" != "$lbh" ]; then
         bhash_changed=1
       fi
 
@@ -196,11 +210,11 @@ while tmux info > /dev/null 2>&1; do
         sc=$((sc + 1))
       fi
 
-      # Hermes needs sustained growth (gs>=2): one above-threshold bump alone could still be a
-      # large-ish heartbeat or reflow; two consecutive growing rounds means real output. Every
-      # other agent keeps the immediate GROWTH_THRESHOLD=1 path.
+      # Heartbeat-prone agents need sustained growth (gs>=2): one above-threshold bump alone could
+      # still be a large-ish heartbeat or reflow; two consecutive growing rounds means real output.
+      # Every other agent keeps the immediate GROWTH_THRESHOLD=1 path.
       growth_need=$GROWTH_THRESHOLD
-      [ "$marker" = "Ⓗ" ] && growth_need=2
+      [ "$min_growth" -gt 0 ] && growth_need=2
       if [ "$changed" = 1 ] && [ "$gs" -ge "$growth_need" ]; then
         new_active=1
         new_done=0
